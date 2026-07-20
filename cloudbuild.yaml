@@ -31,6 +31,6 @@ images:
 
 options:
   logging: CLOUD_LOGGING_ONLY
-  serviceAccount: 'projects/$PROJECT_ID/serviceAccounts/agente-pt-nutricao@$PROJECT_ID.iam.gserviceaccount.com'
+
 
 
