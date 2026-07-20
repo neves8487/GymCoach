@@ -65,7 +65,21 @@ adk web
 # Seleciona "gym_coach" no dropdown
 ```
 
-### 5. Correr o Webhook localmente
+### 5. Correr o Telegram Bot localmente (Recomendado para Testes)
+
+1. Cria um Bot no Telegram enviando `/newbot` ao [@BotFather](https://t.me/BotFather) e obtém o token da API.
+2. Adiciona o token ao teu ficheiro `.env`:
+   ```env
+   TELEGRAM_TOKEN=o_teu_token_aqui
+   ```
+3. Executa o bot:
+   ```bash
+   python telegram_bot.py
+   ```
+4. Abre o Telegram e envia mensagens ou fotos ao teu bot para testar a experiência conversacional!
+
+### 6. Correr o Webhook do WhatsApp localmente
+
 
 ```bash
 uvicorn webhook.app:app --reload --port 8080
@@ -87,6 +101,7 @@ echo -n "TOKEN" | gcloud secrets create whatsapp-token --data-file=-
 echo -n "PHONE_ID" | gcloud secrets create whatsapp-phone-id --data-file=-
 echo -n "VERIFY" | gcloud secrets create whatsapp-verify-token --data-file=-
 echo -n "SECRET" | gcloud secrets create whatsapp-app-secret --data-file=-
+echo -n "TELEGRAM_TOKEN" | gcloud secrets create telegram-token --data-file=-
 ```
 
 2. Deploy:
@@ -94,9 +109,14 @@ echo -n "SECRET" | gcloud secrets create whatsapp-app-secret --data-file=-
 gcloud builds submit --config cloudbuild.yaml
 ```
 
-3. Configurar webhook na Meta Developer Console:
+3. Configurar webhook na Meta Developer Console (WhatsApp):
    - URL: `https://gym-coach-XXXXX.run.app/webhook`
    - Verify token: o mesmo que guardaste no Secret Manager
+
+4. Configurar webhook no Telegram:
+   Envia um pedido HTTP para registar o teu URL do Cloud Run como webhook do teu bot:
+   `https://api.telegram.org/bot<TELEGRAM_TOKEN>/setWebhook?url=https://gym-coach-XXXXX.run.app/telegram-webhook`
+
 
 ## Funcionalidades
 

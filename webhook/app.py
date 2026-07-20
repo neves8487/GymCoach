@@ -25,6 +25,7 @@ from google.genai import types
 
 from gym_coach.agent import root_agent
 from webhook.whatsapp_client import WhatsAppClient
+from webhook.telegram_client import TelegramClient
 from webhook.signature import verify_signature
 
 logger = logging.getLogger(__name__)
@@ -35,12 +36,13 @@ logger = logging.getLogger(__name__)
 runner: Runner | None = None
 session_service: InMemorySessionService | None = None
 wa_client: WhatsAppClient | None = None
+tg_client: TelegramClient | None = None
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialise shared resources on startup."""
-    global runner, session_service, wa_client
+    global runner, session_service, wa_client, tg_client
 
     # Configure logging
     log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -64,7 +66,10 @@ async def lifespan(application: FastAPI):
     # WhatsApp client
     wa_client = WhatsAppClient()
 
-    logger.info("GymCoach ready — runner and WhatsApp client initialised")
+    # Telegram client
+    tg_client = TelegramClient()
+
+    logger.info("GymCoach ready — runner, WhatsApp and Telegram clients initialised")
     yield
     logger.info("GymCoach shutting down")
 
@@ -331,3 +336,156 @@ async def _process_message(message_data: dict[str, Any]) -> None:
             phone,
             "⚠️ Ocorreu um erro a processar a tua mensagem. Tenta novamente.",
         )
+
+
+# ------------------------------------------------------------------
+# Telegram Webhook — Incoming messages (POST)
+# ------------------------------------------------------------------
+
+@app.post("/telegram-webhook")
+async def telegram_webhook_receive(
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> dict[str, str]:
+    """
+    Receive incoming Telegram messages and process them via ADK.
+
+    Returns 200 immediately and processes in background to avoid
+    Telegram timeout/retry.
+    """
+    try:
+        payload: dict[str, Any] = await request.json()
+    except Exception:
+        logger.exception("Failed to parse Telegram webhook payload")
+        return {"status": "error"}
+
+    # Extract update message
+    message = payload.get("message")
+    if not message:
+        # We only care about normal message events
+        return {"status": "no_message"}
+
+    # Process in background
+    background_tasks.add_task(_process_telegram_message, message)
+
+    return {"status": "received"}
+
+
+async def _process_telegram_message(message: dict[str, Any]) -> None:
+    """
+    Process a single Telegram message through the ADK agent.
+    """
+    global runner, session_service, tg_client
+
+    if runner is None or session_service is None or tg_client is None:
+        logger.error("Runner/session/client not initialised")
+        return
+
+    chat_id = message["chat"]["id"]
+    text = message.get("text")
+    photo = message.get("photo")
+    caption = message.get("caption", "Analisa esta refeição.")
+    user_id = f"telegram_{chat_id}"
+
+    # Build ADK content based on message type
+    parts: list[types.Part] = []
+
+    if text:
+        # Format slash commands into standard start phrases
+        if text.startswith("/"):
+            if text == "/start":
+                text = "Olá! Quero começar a treinar e registar as minhas refeições."
+            else:
+                text = text.lstrip("/")
+        parts.append(types.Part(text=text))
+
+    elif photo:
+        # Download largest available photo size
+        largest_photo = photo[-1]
+        file_id = largest_photo["file_id"]
+
+        try:
+            image_bytes = await tg_client.download_file(file_id)
+
+            # Upload to Cloud Storage
+            from gym_coach.services import storage_client
+            gs_uri = storage_client.upload_photo(user_id, image_bytes)
+
+            # Send image as inline data to Gemini
+            parts.append(types.Part.from_bytes(
+                data=image_bytes,
+                mime_type="image/jpeg",
+            ))
+            parts.append(types.Part(
+                text=f"{caption}\n\n[Foto guardada em: {gs_uri}]"
+            ))
+        except Exception:
+            logger.exception("Failed to process Telegram photo %s", file_id)
+            await tg_client.send_text(
+                chat_id,
+                "⚠️ Desculpa, não consegui processar a imagem. Tenta novamente.",
+            )
+            return
+    else:
+        # Unsupported type
+        await tg_client.send_text(
+            chat_id,
+            "Por agora só consigo processar mensagens de texto e fotos 📸",
+        )
+        return
+
+    # Ensure session exists
+    try:
+        session = await session_service.get_session(
+            app_name="gym_coach",
+            user_id=user_id,
+            session_id=user_id,
+        )
+        if session is None:
+            session = await session_service.create_session(
+                app_name="gym_coach",
+                user_id=user_id,
+                session_id=user_id,
+                state={"user_phone": user_id},
+            )
+            logger.info("New Telegram session created for %s", user_id)
+    except Exception:
+        logger.exception("Error checking/creating session for %s", user_id)
+        await tg_client.send_text(
+            chat_id,
+            "⚠️ Ocorreu um erro a inicializar a tua sessão. Tenta novamente.",
+        )
+        return
+
+    # Run the agent
+    try:
+        content = types.Content(role="user", parts=parts)
+        final_response = ""
+
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=user_id,
+            new_message=content,
+        ):
+            if event.is_final_response():
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if part.text:
+                            final_response += part.text
+
+        if final_response:
+            await tg_client.send_text(chat_id, final_response)
+        else:
+            logger.warning("Agent returned empty response for %s", user_id)
+            await tg_client.send_text(
+                chat_id,
+                "🤔 Não consegui gerar uma resposta. Tenta reformular a mensagem.",
+            )
+
+    except Exception:
+        logger.exception("Error running agent for %s", user_id)
+        await tg_client.send_text(
+            chat_id,
+            "⚠️ Ocorreu um erro a processar a tua mensagem. Tenta novamente.",
+        )
+
