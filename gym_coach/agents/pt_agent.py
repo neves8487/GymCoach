@@ -22,7 +22,7 @@ _SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8")
 
 pt_agent = Agent(
     name="pt_agent",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     description=(
         "Agente Personal Trainer especializado em powerlifting. "
         "Gere treinos, sugere pesos com base no histórico, regista resultados "

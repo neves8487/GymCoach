@@ -31,7 +31,7 @@ _SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8")
 
 root_agent = Agent(
     name="gym_coach",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     description=(
         "GymCoach — assistente pessoal de treino de powerlifting e nutrição "
         "desportiva. Orquestra sub-agentes especializados para treino (PT) "
