@@ -22,6 +22,7 @@ steps:
       - '--memory=512Mi'
       - '--min-instances=0'
       - '--max-instances=3'
+      - '--service-account=agente-pt-nutricao@$PROJECT_ID.iam.gserviceaccount.com'
       - '--set-secrets=WHATSAPP_TOKEN=whatsapp-token:latest,WHATSAPP_PHONE_NUMBER_ID=whatsapp-phone-id:latest,WHATSAPP_VERIFY_TOKEN=whatsapp-verify-token:latest,WHATSAPP_APP_SECRET=whatsapp-app-secret:latest'
       - '--set-env-vars=GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=europe-west1,GCS_BUCKET_NAME=fotos-refeicoes,LOG_LEVEL=INFO'
 
