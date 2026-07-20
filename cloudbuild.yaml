@@ -28,3 +28,7 @@ steps:
 
 images:
   - 'gcr.io/$PROJECT_ID/gym-coach'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
