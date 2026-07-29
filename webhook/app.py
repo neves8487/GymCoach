@@ -278,16 +278,24 @@ async def _run_agent(user_id: str, session_id: str, message: str) -> str:
             session_id=clean_session,
             message=message,
         ):
-            # Agent Engine SDK streams dicts with 'content' keys
             if isinstance(event, dict):
-                content = event.get("content", "")
+                content = event.get("content")
                 if isinstance(content, str):
                     final += content
+                elif isinstance(content, dict):
+                    parts = content.get("parts", [])
+                    if isinstance(parts, list):
+                        for part in parts:
+                            if isinstance(part, dict) and "text" in part:
+                                final += str(part["text"])
             elif hasattr(event, "content") and event.content:
-                if hasattr(event.content, "parts"):
-                    for part in event.content.parts:
+                c = event.content
+                if isinstance(c, str):
+                    final += c
+                elif hasattr(c, "parts") and c.parts:
+                    for part in c.parts:
                         if hasattr(part, "text") and part.text:
-                            final += part.text
+                            final += str(part.text)
         return final
     else:
         # --- Local Runner ---
