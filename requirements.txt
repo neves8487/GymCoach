@@ -1,17 +1,9 @@
-# Core
-google-adk[a2a]
-google-cloud-aiplatform[adk,agent_engines]
+# Webhook Runtime Dependencies (Cloud Run)
 fastapi
 uvicorn[standard]
 httpx
 pydantic-settings
 python-multipart
-
-# GCP
-google-cloud-firestore
+google-cloud-aiplatform
 google-cloud-storage
 google-cloud-secret-manager
-
-# Testing
-pytest
-pytest-asyncio

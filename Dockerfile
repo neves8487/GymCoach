@@ -13,12 +13,11 @@ WORKDIR /app
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy application code
-COPY gym_coach/ ./gym_coach/
+# Copy minimal application code required for webhook + GCS photo service
 COPY webhook/ ./webhook/
-COPY .env.example ./.env.example
+COPY gym_coach/services/ ./gym_coach/services/
+COPY gym_coach/__init__.py ./gym_coach/
 
-# Cloud Run expects port 8080
 EXPOSE 8080
 
 CMD ["uvicorn", "webhook.app:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
