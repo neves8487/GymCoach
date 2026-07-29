@@ -228,6 +228,16 @@ def _extract_message(payload: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
+import re
+
+
+def _clean_session_id(raw_id: str) -> str:
+    """Sanitise user/session ID to a valid GCP resource slug [a-z0-9-]."""
+    slug = str(raw_id).lower().replace("_", "-").replace("+", "").replace(" ", "")
+    clean = re.sub(r"[^a-z0-9-]", "", slug)
+    return clean or "user"
+
+
 # ------------------------------------------------------------------
 # Shared agent execution — local Runner or remote Agent Engine
 # ------------------------------------------------------------------
@@ -240,6 +250,9 @@ async def _run_agent(user_id: str, session_id: str, message: str) -> str:
       LOCAL  — Runner.run_async() with in-process sessions
       REMOTE — agent_engine.async_stream_query() via Agent Engine SDK
     """
+    clean_user = _clean_session_id(user_id)
+    clean_session = _clean_session_id(session_id)
+
     if _USE_REMOTE:
         # --- Agent Engine SDK ---
         if agent_engine is None:
@@ -247,8 +260,8 @@ async def _run_agent(user_id: str, session_id: str, message: str) -> str:
 
         final = ""
         async for event in agent_engine.async_stream_query(
-            user_id=user_id,
-            session_id=session_id,
+            user_id=clean_user,
+            session_id=clean_session,
             message=message,
         ):
             # Agent Engine SDK streams dicts with 'content' keys
