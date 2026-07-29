@@ -258,6 +258,16 @@ async def _run_agent(user_id: str, session_id: str, message: str) -> str:
         if agent_engine is None:
             raise RuntimeError("Agent Engine not initialised")
 
+        # Auto-create session if it doesn't exist yet
+        try:
+            await agent_engine.async_get_session(user_id=clean_user, session_id=clean_session)
+        except Exception:
+            try:
+                await agent_engine.async_create_session(user_id=clean_user, session_id=clean_session)
+                logger.info("Created new Agent Engine session %s for user %s", clean_session, clean_user)
+            except Exception:
+                logger.warning("Could not auto-create session %s (may already exist)", clean_session)
+
         final = ""
         async for event in agent_engine.async_stream_query(
             user_id=clean_user,
