@@ -19,7 +19,7 @@ class TelegramClient:
     """Async client for the Telegram Bot API."""
 
     def __init__(self, token: str | None = None) -> None:
-        self._token = token or os.getenv("TELEGRAM_TOKEN", "")
+        self._token = (token or os.getenv("TELEGRAM_TOKEN", "")).strip()
         self._base_url = f"https://api.telegram.org/bot{self._token}"
         self._file_url = f"https://api.telegram.org/file/bot{self._token}"
 

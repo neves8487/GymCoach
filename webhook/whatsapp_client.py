@@ -26,8 +26,8 @@ class WhatsAppClient:
         token: str | None = None,
         phone_number_id: str | None = None,
     ) -> None:
-        self._token = token or os.getenv("WHATSAPP_TOKEN", "")
-        self._phone_number_id = phone_number_id or os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+        self._token = (token or os.getenv("WHATSAPP_TOKEN", "")).strip()
+        self._phone_number_id = (phone_number_id or os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")).strip()
         self._base_url = f"{GRAPH_API_BASE}/{self._phone_number_id}/messages"
         self._headers = {
             "Authorization": f"Bearer {self._token}",
