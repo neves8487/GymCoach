@@ -287,7 +287,7 @@ def _resolve_project(arg: str | None) -> str:
 
 
 def _resolve_location(arg: str | None) -> str:
-    return arg or os.environ.get("GOOGLE_CLOUD_LOCATION", "europe-west1")
+    return arg or os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 
 
 # ---------------------------------------------------------------
