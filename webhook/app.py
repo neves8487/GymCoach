@@ -251,7 +251,7 @@ async def _run_agent(user_id: str, session_id: str, message: str) -> str:
       REMOTE — agent_engine.async_stream_query() via Agent Engine SDK
     """
     clean_user = _clean_session_id(user_id)
-    clean_session = _clean_session_id(session_id)
+    clean_session = f"session-{clean_user}"
 
     if _USE_REMOTE:
         # --- Agent Engine SDK ---
@@ -263,7 +263,11 @@ async def _run_agent(user_id: str, session_id: str, message: str) -> str:
             await agent_engine.async_get_session(user_id=clean_user, session_id=clean_session)
         except Exception:
             try:
-                await agent_engine.async_create_session(user_id=clean_user, session_id=clean_session)
+                await agent_engine.async_create_session(
+                    user_id=clean_user,
+                    session_id=clean_session,
+                    state={"user_phone": clean_user},
+                )
                 logger.info("Created new Agent Engine session %s for user %s", clean_session, clean_user)
             except Exception:
                 logger.warning("Could not auto-create session %s (may already exist)", clean_session)
