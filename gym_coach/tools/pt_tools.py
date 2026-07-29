@@ -146,11 +146,11 @@ def guardar_plano_treino(
 ) -> dict:
     """
     Guarda ou atualiza o plano de treino estruturado para um dia da semana (ex: 'segunda', 'terca',
-    'quarta', 'quinta', 'sexta', 'sabado', 'domingo', 'push', 'pull', 'legs').
+    'quarta', 'quinta', 'sexta', 'sabado', 'domingo').
 
     Args:
-        dia_semana: Dia da semana ou nome da divisão (ex: 'terca', 'quarta', 'push', 'pull').
-        nome_treino: Nome/foco do treino (ex: 'Costas e Bíceps (Foco em Muscle-Ups)').
+        dia_semana: Dia da semana ou nome da divisão.
+        nome_treino: Nome/foco do treino ).
         exercicios: Lista de exercícios planeados. Cada exercício é um dicionário com:
                     - nome (str): nome do exercício (ex: 'Remada Bent Over')
                     - peso (float): peso recomendado em kg
