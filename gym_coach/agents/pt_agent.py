@@ -13,6 +13,8 @@ from google.adk.agents import Agent
 
 from gym_coach.tools.pt_tools import (
     get_historico_exercicio,
+    guardar_plano_treino,
+    obter_plano_treino,
     registar_treino,
 )
 
@@ -25,13 +27,14 @@ pt_agent = Agent(
     model="gemini-2.5-flash",
     description=(
         "Agente Personal Trainer especializado em powerlifting. "
-        "Gere treinos, sugere pesos com base no histórico, regista resultados "
-        "e aplica regras de progressão. Usa quando o utilizador fala sobre "
-        "treinos, exercícios, pesos, séries, RPE, ou pede o treino do dia."
+        "Gere treinos, sugere pesos com base no histórico, guarda e recupera "
+        "planos de treino editáveis, regista resultados e aplica regras de progressão."
     ),
     instruction=_SYSTEM_PROMPT,
     tools=[
         get_historico_exercicio,
         registar_treino,
+        guardar_plano_treino,
+        obter_plano_treino,
     ],
 )

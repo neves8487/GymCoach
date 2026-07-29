@@ -135,3 +135,71 @@ def _analyse_session(series: list[dict], dor: bool) -> dict:
         result["sugestao"] = "REDUZIR 5-10% — houve falha."
 
     return result
+
+
+def guardar_plano_treino(
+    dia_semana: str,
+    nome_treino: str,
+    exercicios: list[dict],
+    tool_context: ToolContext,
+    notas: str = "",
+) -> dict:
+    """
+    Guarda ou atualiza o plano de treino estruturado para um dia da semana (ex: 'segunda', 'terca',
+    'quarta', 'quinta', 'sexta', 'sabado', 'domingo', 'push', 'pull', 'legs').
+
+    Args:
+        dia_semana: Dia da semana ou nome da divisão (ex: 'terca', 'quarta', 'push', 'pull').
+        nome_treino: Nome/foco do treino (ex: 'Costas e Bíceps (Foco em Muscle-Ups)').
+        exercicios: Lista de exercícios planeados. Cada exercício é um dicionário com:
+                    - nome (str): nome do exercício (ex: 'Remada Bent Over')
+                    - peso (float): peso recomendado em kg
+                    - sets (int): número de séries alvo
+                    - reps (int): número de repetições alvo
+                    - rpe_alvo (float, opcional): RPE alvo (ex: 8.0)
+                    - notas (str, opcional): observações/equipamento (ex: 'Barra W')
+        notas: Notas ou orientações gerais para o treino.
+    """
+    user_phone = tool_context.state.get("user_phone", "")
+    if not user_phone:
+        return {"error": "Número de telefone não disponível."}
+
+    plan_data = {
+        "nome_treino": nome_treino,
+        "exercicios": exercicios,
+        "notas": notas,
+    }
+
+    dia_id = db.save_workout_plan(user_phone, dia_semana, plan_data)
+    return {
+        "status": "plano_guardado",
+        "dia_semana": dia_id,
+        "nome_treino": nome_treino,
+        "total_exercicios": len(exercicios),
+    }
+
+
+def obter_plano_treino(
+    tool_context: ToolContext,
+    dia_semana: str | None = None,
+) -> dict:
+    """
+    Obtém o plano de treino guardado para um dia específico (ex: 'quarta') ou
+    todos os planos guardados para a semana se dia_semana for omitido/None.
+
+    Args:
+        dia_semana: Dia da semana opcional (ex: 'segunda', 'quarta', 'pull').
+    """
+    user_phone = tool_context.state.get("user_phone", "")
+    if not user_phone:
+        return {"error": "Número de telefone não disponível."}
+
+    planos = db.get_workout_plan(user_phone, dia_semana)
+    if not planos:
+        msg = f"Sem plano guardado para '{dia_semana}'." if dia_semana else "Sem planos de treino guardados."
+        return {"planos": [], "nota": msg}
+
+    return {
+        "total_planos": len(planos),
+        "planos": planos,
+    }

@@ -61,9 +61,9 @@ def delete_all_user_data(phone: str) -> dict[str, int]:
     """
     db = _get_db()
     user_ref = db.collection("users").document(phone)
-    deleted = {"treinos": 0, "refeicoes": 0}
+    deleted = {"treinos": 0, "refeicoes": 0, "planos_treino": 0}
 
-    for sub in ("treinos", "refeicoes"):
+    for sub in ("treinos", "refeicoes", "planos_treino"):
         docs = list(user_ref.collection(sub).stream())
         for doc in docs:
             doc.reference.delete()
@@ -204,3 +204,59 @@ def confirm_meal(phone: str, meal_id: str) -> None:
         .update({"confirmado": True})
     )
     logger.info("Meal %s confirmed for %s", meal_id, phone)
+
+
+# =====================================================================
+# Workout Plans (planos_treino)
+# =====================================================================
+
+def save_workout_plan(phone: str, dia_semana: str, plan_data: dict[str, Any]) -> str:
+    """
+    Save or update a planned workout for a specific day of the week or split name.
+    Collection: users/{phone}/planos_treino/{dia_semana_clean}
+    """
+    dia_clean = str(dia_semana).lower().strip()
+    plan_data["dia_semana"] = dia_clean
+    plan_data["updated_at"] = datetime.utcnow().isoformat()
+
+    ref = (
+        _get_db()
+        .collection("users")
+        .document(phone)
+        .collection("planos_treino")
+        .document(dia_clean)
+    )
+    ref.set(plan_data, merge=True)
+    logger.info("Workout plan saved for %s on %s", phone, dia_clean)
+    return dia_clean
+
+
+def get_workout_plan(phone: str, dia_semana: str | None = None) -> list[dict[str, Any]]:
+    """
+    Fetch workout plan(s). If dia_semana is provided, fetches that specific plan.
+    Otherwise returns all saved workout plans for the user.
+    """
+    user_ref = _get_db().collection("users").document(phone).collection("planos_treino")
+    if dia_semana:
+        dia_clean = str(dia_semana).lower().strip()
+        doc = user_ref.document(dia_clean).get()
+        if doc.exists:
+            d = doc.to_dict()
+            d["id"] = doc.id
+            return [d]
+        return []
+
+    docs = list(user_ref.stream())
+    results = []
+    for doc in docs:
+        d = doc.to_dict()
+        d["id"] = doc.id
+        results.append(d)
+    return results
+
+
+def delete_workout_plan(phone: str, dia_semana: str) -> None:
+    """Delete a workout plan for a specific day."""
+    dia_clean = str(dia_semana).lower().strip()
+    _get_db().collection("users").document(phone).collection("planos_treino").document(dia_clean).delete()
+    logger.info("Workout plan %s deleted for %s", dia_clean, phone)
