@@ -1,4 +1,4 @@
-# Webhook Runtime Dependencies (Cloud Run)
+# Webhook & Agent Engine Runtime Dependencies
 fastapi
 uvicorn[standard]
 httpx
@@ -7,3 +7,6 @@ python-multipart
 google-cloud-aiplatform
 google-cloud-storage
 google-cloud-secret-manager
+google-cloud-firestore
+google-adk
+a2a-sdk
