@@ -24,7 +24,7 @@ _SYSTEM_PROMPT = _PROMPT_PATH.read_text(encoding="utf-8")
 
 nutrition_agent = Agent(
     name="nutrition_agent",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     description=(
         "Agente Nutricionista especializado em nutrição desportiva. "
         "Analisa fotos de refeições para estimar calorias e macronutrientes, "

@@ -1,17 +1,17 @@
 """
 GymCoach — FastAPI Webhook Application.
 
-Integrates the ADK Runner with WhatsApp Business API:
-1. Receives messages from WhatsApp via POST /webhook
-2. Passes them to the ADK root_agent via Runner
-3. Sends the agent's response back via WhatsApp API
+Two operating modes (auto-detected):
 
-The ADK Runner manages sessions (conversation memory) per user.
+  LOCAL  — Runs the ADK Runner in-process (default, for dev).
+  REMOTE — Queries a deployed Agent Engine instance via SDK.
+           Activated by setting AGENT_ENGINE_RESOURCE_NAME.
+
+Both modes share the same WhatsApp/Telegram integration layer.
 """
 
 from __future__ import annotations
 
-import base64
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -19,11 +19,8 @@ from typing import Any
 
 from fastapi import FastAPI, Request, Response, HTTPException, BackgroundTasks
 
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from gym_coach.agent import root_agent
 from webhook.whatsapp_client import WhatsAppClient
 from webhook.telegram_client import TelegramClient
 from webhook.signature import verify_signature
@@ -31,10 +28,17 @@ from webhook.signature import verify_signature
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
+# Mode detection
+# ------------------------------------------------------------------
+_AGENT_ENGINE_RESOURCE = os.getenv("AGENT_ENGINE_RESOURCE_NAME", "")
+_USE_REMOTE = bool(_AGENT_ENGINE_RESOURCE)
+
+# ------------------------------------------------------------------
 # Globals initialised at startup
 # ------------------------------------------------------------------
-runner: Runner | None = None
-session_service: InMemorySessionService | None = None
+runner = None          # Runner (local mode) or None
+session_service = None # InMemorySessionService (local) or None
+agent_engine = None    # ReasoningEngine handle (remote mode) or None
 wa_client: WhatsAppClient | None = None
 tg_client: TelegramClient | None = None
 
@@ -42,7 +46,7 @@ tg_client: TelegramClient | None = None
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     """Initialise shared resources on startup."""
-    global runner, session_service, wa_client, tg_client
+    global runner, session_service, agent_engine, wa_client, tg_client
 
     # Configure logging
     log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -52,24 +56,36 @@ async def lifespan(application: FastAPI):
     )
     logger.info("GymCoach starting up...")
 
-    # ADK Session Service
-    # TODO: Replace with DatabaseSessionService (Firestore-backed) for production
-    session_service = InMemorySessionService()
+    if _USE_REMOTE:
+        # --- REMOTE mode: connect to Agent Engine ---
+        import vertexai
+        from vertexai import agent_engines
 
-    # ADK Runner — connects the agent to the session service
-    runner = Runner(
-        agent=root_agent,
-        app_name="gym_coach",
-        session_service=session_service,
-    )
+        project = os.getenv("GOOGLE_CLOUD_PROJECT")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "europe-west1")
+        vertexai.init(project=project, location=location)
 
-    # WhatsApp client
+        agent_engine = agent_engines.get(_AGENT_ENGINE_RESOURCE)
+        logger.info("Remote mode — connected to Agent Engine: %s", _AGENT_ENGINE_RESOURCE)
+    else:
+        # --- LOCAL mode: in-process Runner ---
+        from google.adk.runners import Runner
+        from google.adk.sessions import InMemorySessionService
+        from gym_coach.agent import root_agent
+
+        session_service = InMemorySessionService()
+        runner = Runner(
+            agent=root_agent,
+            app_name="gym_coach",
+            session_service=session_service,
+        )
+        logger.info("Local mode — Runner initialised with in-process agent")
+
+    # Messaging clients
     wa_client = WhatsAppClient()
-
-    # Telegram client
     tg_client = TelegramClient()
 
-    logger.info("GymCoach ready — runner, WhatsApp and Telegram clients initialised")
+    logger.info("GymCoach ready")
     yield
     logger.info("GymCoach shutting down")
 
@@ -213,24 +229,85 @@ def _extract_message(payload: dict[str, Any]) -> dict[str, Any] | None:
 
 
 # ------------------------------------------------------------------
-# Message processing (runs in background)
+# Shared agent execution — local Runner or remote Agent Engine
+# ------------------------------------------------------------------
+
+async def _run_agent(user_id: str, session_id: str, message: str) -> str:
+    """
+    Send a message to the agent and return the final text response.
+
+    Transparently handles both modes:
+      LOCAL  — Runner.run_async() with in-process sessions
+      REMOTE — agent_engine.async_stream_query() via Agent Engine SDK
+    """
+    if _USE_REMOTE:
+        # --- Agent Engine SDK ---
+        if agent_engine is None:
+            raise RuntimeError("Agent Engine not initialised")
+
+        final = ""
+        async for event in agent_engine.async_stream_query(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+        ):
+            # Agent Engine SDK streams dicts with 'content' keys
+            if isinstance(event, dict):
+                content = event.get("content", "")
+                if isinstance(content, str):
+                    final += content
+            elif hasattr(event, "content") and event.content:
+                if hasattr(event.content, "parts"):
+                    for part in event.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            final += part.text
+        return final
+    else:
+        # --- Local Runner ---
+        if runner is None or session_service is None:
+            raise RuntimeError("Runner/session not initialised")
+
+        # Ensure session exists
+        session = await session_service.get_session(
+            app_name="gym_coach",
+            user_id=user_id,
+            session_id=session_id,
+        )
+        if session is None:
+            await session_service.create_session(
+                app_name="gym_coach",
+                user_id=user_id,
+                session_id=session_id,
+                state={"user_phone": user_id},
+            )
+            logger.info("New session created for %s", user_id)
+
+        content = types.Content(
+            role="user",
+            parts=[types.Part(text=message)],
+        )
+        final = ""
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session_id,
+            new_message=content,
+        ):
+            if event.is_final_response():
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if part.text:
+                            final += part.text
+        return final
+
+
+# ------------------------------------------------------------------
+# WhatsApp message processing (runs in background)
 # ------------------------------------------------------------------
 
 async def _process_message(message_data: dict[str, Any]) -> None:
-    """
-    Process a single WhatsApp message through the ADK agent.
-
-    Flow:
-    1. Mark as read
-    2. Ensure session exists (create if needed)
-    3. Build the ADK content (text or image)
-    4. Run the agent via Runner
-    5. Send response back via WhatsApp
-    """
-    global runner, session_service, wa_client
-
-    if runner is None or session_service is None or wa_client is None:
-        logger.error("Runner/session/client not initialised")
+    """Process a single WhatsApp message through the agent."""
+    if wa_client is None:
+        logger.error("WhatsApp client not initialised")
         return
 
     phone = message_data["from"]
@@ -242,52 +319,20 @@ async def _process_message(message_data: dict[str, Any]) -> None:
     except Exception:
         logger.warning("Failed to mark message as read")
 
-    # Ensure session exists for this user
-    session_id = phone  # 1 session per phone number
-    session = await session_service.get_session(
-        app_name="gym_coach",
-        user_id=phone,
-        session_id=session_id,
-    )
-    if session is None:
-        session = await session_service.create_session(
-            app_name="gym_coach",
-            user_id=phone,
-            session_id=session_id,
-            state={"user_phone": phone},  # Inject phone into state for tools
-        )
-        logger.info("New session created for %s", phone)
-
-    # Build ADK content based on message type
-    parts: list[types.Part] = []
-
+    # Build message text
     if msg_type == "text":
         text = message_data.get("text", "")
         if not text:
             return
-        parts.append(types.Part(text=text))
-
     elif msg_type == "image":
-        # Download image from WhatsApp
         image_id = message_data.get("image_id", "")
         caption = message_data.get("image_caption", "Analisa esta refeição.")
         if image_id:
             try:
                 image_bytes = await wa_client.download_media(image_id)
-
-                # Upload to Cloud Storage
                 from gym_coach.services import storage_client
                 gs_uri = storage_client.upload_photo(phone, image_bytes)
-
-                # Send image as inline data to Gemini
-                image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-                parts.append(types.Part.from_bytes(
-                    data=image_bytes,
-                    mime_type="image/jpeg",
-                ))
-                parts.append(types.Part(
-                    text=f"{caption}\n\n[Foto guardada em: {gs_uri}]"
-                ))
+                text = f"{caption}\n\n[Foto guardada em: {gs_uri}]"
             except Exception:
                 logger.exception("Failed to process image %s", image_id)
                 await wa_client.send_text(
@@ -298,38 +343,27 @@ async def _process_message(message_data: dict[str, Any]) -> None:
         else:
             return
     else:
-        # Unsupported message type
         await wa_client.send_text(
             phone,
             "Por agora só consigo processar mensagens de texto e fotos 📸",
         )
         return
 
-    # Run the agent
+    # Run the agent and send response
     try:
-        content = types.Content(role="user", parts=parts)
-
-        final_response = ""
-        async for event in runner.run_async(
+        response = await _run_agent(
             user_id=phone,
-            session_id=session_id,
-            new_message=content,
-        ):
-            if event.is_final_response():
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if part.text:
-                            final_response += part.text
-
-        if final_response:
-            await wa_client.send_text(phone, final_response)
+            session_id=phone,
+            message=text,
+        )
+        if response:
+            await wa_client.send_text(phone, response)
         else:
             logger.warning("Agent returned empty response for %s", phone)
             await wa_client.send_text(
                 phone,
                 "🤔 Não consegui gerar uma resposta. Tenta reformular a mensagem.",
             )
-
     except Exception:
         logger.exception("Error running agent for %s", phone)
         await wa_client.send_text(
@@ -372,13 +406,9 @@ async def telegram_webhook_receive(
 
 
 async def _process_telegram_message(message: dict[str, Any]) -> None:
-    """
-    Process a single Telegram message through the ADK agent.
-    """
-    global runner, session_service, tg_client
-
-    if runner is None or session_service is None or tg_client is None:
-        logger.error("Runner/session/client not initialised")
+    """Process a single Telegram message through the agent."""
+    if tg_client is None:
+        logger.error("Telegram client not initialised")
         return
 
     chat_id = message["chat"]["id"]
@@ -387,38 +417,21 @@ async def _process_telegram_message(message: dict[str, Any]) -> None:
     caption = message.get("caption", "Analisa esta refeição.")
     user_id = f"telegram_{chat_id}"
 
-    # Build ADK content based on message type
-    parts: list[types.Part] = []
-
+    # Build message text
     if text:
-        # Format slash commands into standard start phrases
         if text.startswith("/"):
             if text == "/start":
                 text = "Olá! Quero começar a treinar e registar as minhas refeições."
             else:
                 text = text.lstrip("/")
-        parts.append(types.Part(text=text))
-
     elif photo:
-        # Download largest available photo size
         largest_photo = photo[-1]
         file_id = largest_photo["file_id"]
-
         try:
             image_bytes = await tg_client.download_file(file_id)
-
-            # Upload to Cloud Storage
             from gym_coach.services import storage_client
             gs_uri = storage_client.upload_photo(user_id, image_bytes)
-
-            # Send image as inline data to Gemini
-            parts.append(types.Part.from_bytes(
-                data=image_bytes,
-                mime_type="image/jpeg",
-            ))
-            parts.append(types.Part(
-                text=f"{caption}\n\n[Foto guardada em: {gs_uri}]"
-            ))
+            text = f"{caption}\n\n[Foto guardada em: {gs_uri}]"
         except Exception:
             logger.exception("Failed to process Telegram photo %s", file_id)
             await tg_client.send_text(
@@ -427,61 +440,27 @@ async def _process_telegram_message(message: dict[str, Any]) -> None:
             )
             return
     else:
-        # Unsupported type
         await tg_client.send_text(
             chat_id,
             "Por agora só consigo processar mensagens de texto e fotos 📸",
         )
         return
 
-    # Ensure session exists
+    # Run the agent and send response
     try:
-        session = await session_service.get_session(
-            app_name="gym_coach",
+        response = await _run_agent(
             user_id=user_id,
             session_id=user_id,
+            message=text,
         )
-        if session is None:
-            session = await session_service.create_session(
-                app_name="gym_coach",
-                user_id=user_id,
-                session_id=user_id,
-                state={"user_phone": user_id},
-            )
-            logger.info("New Telegram session created for %s", user_id)
-    except Exception:
-        logger.exception("Error checking/creating session for %s", user_id)
-        await tg_client.send_text(
-            chat_id,
-            "⚠️ Ocorreu um erro a inicializar a tua sessão. Tenta novamente.",
-        )
-        return
-
-    # Run the agent
-    try:
-        content = types.Content(role="user", parts=parts)
-        final_response = ""
-
-        async for event in runner.run_async(
-            user_id=user_id,
-            session_id=user_id,
-            new_message=content,
-        ):
-            if event.is_final_response():
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if part.text:
-                            final_response += part.text
-
-        if final_response:
-            await tg_client.send_text(chat_id, final_response)
+        if response:
+            await tg_client.send_text(chat_id, response)
         else:
             logger.warning("Agent returned empty response for %s", user_id)
             await tg_client.send_text(
                 chat_id,
                 "🤔 Não consegui gerar uma resposta. Tenta reformular a mensagem.",
             )
-
     except Exception:
         logger.exception("Error running agent for %s", user_id)
         await tg_client.send_text(

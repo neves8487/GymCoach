@@ -1,5 +1,6 @@
 # Core
-google-adk
+google-adk[a2a]
+google-cloud-aiplatform[adk,agent_engines]
 fastapi
 uvicorn[standard]
 httpx
