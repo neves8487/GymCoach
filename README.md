@@ -1,263 +1,209 @@
 # 🏋️ GymCoach — AI Personal Trainer & Nutritionist
 
-> Assistente pessoal de treino de powerlifting e nutrição desportiva, acessível via **WhatsApp** e **Telegram**.  
-> Construído com **Google ADK**, **Gemini 2.5 Flash** via **Vertex AI**, com deploy em **Cloud Run** e **Agent Engine**.
+> A production-grade multi-agent personal training and nutrition assistant accessible via **Telegram**.  
+> Built with **Google ADK** (Agent Development Kit), **Gemini 2.5 Flash** on **Google Cloud Vertex AI**, deployed to **Cloud Run** and **Vertex AI Agent Engine**.
 
 ---
 
-## 🏗️ Arquitetura
+## 🏗️ System Architecture
 
 ```
-WhatsApp / Telegram
-        │
-        ▼
-  Cloud Run (FastAPI)
-        │
-        ├─ LOCAL mode ──▶ ADK Runner (in-process)
-        │                       │
-        └─ REMOTE mode ─▶ Agent Engine SDK
-                                │
-                          Root Agent (Orquestrador)
-                           ├── PT Agent ─────────── Treinos, progressão, planos
-                           └── Nutrition Agent ──── Fotos, macros, resumos
-                                    │
-                          Firestore + Cloud Storage
+                       Telegram User
+                             │
+                             ▼
+                  Cloud Run Webhook (FastAPI)
+                             │
+              ┌──────────────┴──────────────┐
+              │                             │
+       LOCAL Mode                    REMOTE Mode
+   ADK Runner (In-Process)      Agent Engine SDK (A2A Protocol)
+              │                             │
+              └──────────────┬──────────────┘
+                             │
+                  Root Agent (Orchestrator)
+                  ├── PT Agent ────────── Workouts, RPE Progression, Prescriptions
+                  └── Nutrition Agent ─── Meal Photos, Macros, Non-Calorie Weight Loss
+                             │
+                 Firestore + Cloud Storage
 ```
 
-### Modos de Operação
+### Execution Modes
 
-| Modo | Quando | Como |
+| Mode | Trigger Condition | Description |
 |---|---|---|
-| **Local** | Dev / `adk web` | Runner in-process com `AgentTool` |
-| **Remote** | Produção | Agent Engine via A2A protocol (`RemoteA2aAgent`) |
-
-O modo é auto-detectado: se `AGENT_ENGINE_RESOURCE_NAME` está definido, usa Remote; caso contrário, Local.
+| **Local** | `AGENT_ENGINE_RESOURCE_NAME` is unset | In-process execution using `adk web` or local FastAPI runner. |
+| **Remote** | `AGENT_ENGINE_RESOURCE_NAME` is set | Production mode querying deployed agents on Vertex AI Agent Engine via A2A protocol. |
 
 ---
 
-## ⚙️ Stack
+## ⚙️ Tech Stack
 
-| Componente | Tecnologia |
+| Component | Technology |
 |---|---|
-| Framework de Agentes | Google ADK |
-| Modelo | Gemini 2.5 Flash (Vertex AI) |
-| Orquestração Multi-Agent | AgentTool (local) / A2A RemoteAgent (remote) |
-| Dados | Firestore + Cloud Storage |
-| Webhook | FastAPI + uvicorn |
-| Canais | WhatsApp Business Cloud API + Telegram Bot API |
-| Deploy — Webhook | Cloud Run + Cloud Build |
-| Deploy — Agentes | Vertex AI Agent Engine |
-| Segredos | Secret Manager |
-| Deploy Script | `scripts/deploy_agent.py` |
+| **Agent Framework** | Google ADK (Agent Development Kit) |
+| **Foundation Model** | Gemini 2.5 Flash (Google Cloud Vertex AI) |
+| **Multi-Agent Protocol** | AgentTool (Local) / A2A RemoteAgent (Remote) |
+| **Persistence Store** | Google Cloud Firestore (Document Database) |
+| **Media Storage** | Google Cloud Storage (Bucket `gymcoach-503009-fotos-refeicoes`) |
+| **Webhook Service** | FastAPI + Uvicorn (Python 3.12, Dockerized) |
+| **Messaging Channel** | Telegram Bot API |
+| **Cloud Hosting** | GCP Cloud Run (Serverless Webhook) |
+| **Agent Engine** | Vertex AI Agent Engine (Managed Reasoning Engines) |
+| **CI/CD & Deployment** | GCP Cloud Build + Custom Deployment Script (`scripts/deploy_agent.py`) |
+| **Secret Management** | GCP Secret Manager |
 
 ---
 
-## 🚀 Setup Local
+## 💡 Key Features
 
-### 1. Pré-requisitos
+### 🏋️ PT Agent (Personal Trainer)
+- **Linear Load Progression**: RPE-driven overload rules (<8 RPE -> +2.5kg upper / +5kg lower; 8-9 RPE -> maintain; >=9.5 RPE or failure -> -5-10% deload).
+- **Automated Prescriptions**: Saves daily prescribed workouts (`users/{phone}/treinos_prescritos/{date}`) allowing users to confirm completion ("I did everything") without re-typing exercises or context bloat.
+- **Clinical Notes & Pain Safety**: Tracks user injuries, pain reports, and medical restrictions persistently (`notas_clinicas`) and automatically adjusts exercise selection.
+- **Structured Workout Plans**: Saves and queries weekly split routines (`planos_treino`).
 
+### 🥗 Nutrition Agent
+- **Visual Meal Analysis**: Multi-modal photo evaluation via Gemini Vision, estimating food items, portions, calories, and macros with declared error margins (±15-20%).
+- **Non-Calorie Counting Strategies**: Practical portion-control guidance using the Hand Method (palms, fists, cupped hands, thumbs) and satiety cues.
+- **Daily & Weekly Summaries**: Aggregates tracked meals against targets saved in the user profile.
+
+### 🔄 Dynamic Session Rotation (Context Bloat Prevention)
+- Generates **daily session IDs** (`session-{user}-{YYYY-MM-DD}`) at the webhook layer.
+- Ensures every new day starts with a fresh context window, eliminating TPM (Tokens per Minute) explosion and preventing GCP `RESOURCE_EXHAUSTED` (429) rate limit errors.
+
+### 📱 Telegram Integration & Clean Formatting
+- Clean output formatting designed specifically for Telegram (emojis, structured line breaks, no invalid raw markdown syntax).
+- Handles text messages, photo analysis, and Telegram commands (`/start`, `/perfil`, `/ajuda`, `/apagar`).
+
+---
+
+## 🗄️ Database Architecture (Firestore Schema)
+
+```
+users/{phone}                          -> Profile (weight, height, goal, 1RMs, clinical notes, exercise preferences)
+├── treinos/{treino_id}                 -> Executed workout logs (exercise, sets, reps, weight, RPE, pain reported)
+├── refeicoes/{refeicao_id}             -> Tracked meal logs (description, foods, calories, macros, photo GCS URI)
+├── planos_treino/{dia_semana}          -> Saved workout splits per day of week
+└── treinos_prescritos/{YYYY-MM-DD}     -> Daily prescribed workout snapshots
+```
+
+---
+
+## 🚀 Local Setup & Development
+
+### 1. Prerequisites
 - Python 3.12+
-- Conta GCP com projeto ativo
-- Conta Meta for Developers com app WhatsApp Business (para WhatsApp)
-- Bot Telegram via [@BotFather](https://t.me/BotFather) (para Telegram)
+- Active GCP Project with Firestore & Vertex AI APIs enabled
+- Telegram Bot Token from [@BotFather](https://t.me/BotFather)
 
-### 2. Instalação
+### 2. Environment Setup
 
 ```bash
+git clone https://github.com/neves8487/GymCoach.git
 cd GymCoach
+
 python -m venv .venv
-.venv\Scripts\activate       # Windows
-# source .venv/bin/activate  # Linux/Mac
+# Windows:
+.venv\Scripts\activate
+# Linux/Mac:
+# source .venv/bin/activate
 
 pip install -r requirements.txt
 ```
 
-### 3. Configuração
+### 3. GCP Credentials
 
-```bash
-cp .env.example .env
-# Editar .env com as tuas credenciais
-```
-
-Autenticação GCP:
 ```bash
 gcloud auth application-default login
 gcloud config set project YOUR_PROJECT_ID
 ```
 
-### 4. Testar com ADK Web UI
+### 4. Run via ADK Web UI
 
 ```bash
 adk web
-# Abre http://localhost:8000
-# Seleciona "gym_coach" no dropdown
+# Opens http://localhost:8000
 ```
 
-### 5. Testar com Telegram (recomendado)
-
-1. Cria um bot no Telegram enviando `/newbot` ao [@BotFather](https://t.me/BotFather)
-2. Adiciona o token ao `.env`:
-   ```env
-   TELEGRAM_TOKEN=o_teu_token_aqui
-   ```
-3. Executa o bot:
-   ```bash
-   python telegram_bot.py
-   ```
-4. Abre o Telegram e envia mensagens ou fotos ao teu bot!
-
-### 6. Correr o Webhook localmente
+### 5. Run Webhook Locally with Telegram
 
 ```bash
+cp .env.example .env
+# Set TELEGRAM_TOKEN in .env
+
 uvicorn webhook.app:app --reload --port 8080
 ```
 
-Para testar com WhatsApp/Telegram real, usa um túnel:
+Register your local webhook URL via ngrok:
 ```bash
 ngrok http 8080
-# Usa o URL HTTPS do ngrok como webhook URL
+curl "https://api.telegram.org/bot<YOUR_TELEGRAM_TOKEN>/setWebhook?url=https://<NGROK_HOST>/telegram-webhook"
 ```
 
 ---
 
-## 📦 Deploy
+## 📦 Cloud Deployment
 
-### Opção A — Agent Engine (agentes na cloud)
-
-Deploy dos agentes no Vertex AI Agent Engine com A2A protocol:
+### 1. Deploy Agents to Vertex AI Agent Engine
 
 ```bash
-# Deploy de todos (PT → Nutrition → Root com A2A URLs)
-python scripts/deploy_agent.py --agent all --staging-bucket gs://your-bucket
+# Deploy all agents (PT -> Nutrition -> Root Orchestrator)
+python scripts/deploy_agent.py --agent all --project YOUR_PROJECT_ID --staging-bucket gs://YOUR_STAGING_BUCKET
 
-# Deploy individual
-python scripts/deploy_agent.py --agent pt --staging-bucket gs://your-bucket
-
-# Atualizar um deploy existente
-python scripts/deploy_agent.py --agent root --update
-
-# Ver estado do deploy
-python scripts/deploy_agent.py --status
-
-# Apagar agentes
-python scripts/deploy_agent.py --agent all --delete
+# Update existing reasoning engine deployments
+python scripts/deploy_agent.py --agent all --update --project YOUR_PROJECT_ID --staging-bucket gs://YOUR_STAGING_BUCKET
 ```
 
-Após o deploy, o script imprime o `AGENT_ENGINE_RESOURCE_NAME` para configurar no webhook.
+### 2. Deploy Webhook Service to Cloud Run
 
-### Opção B — Cloud Run (webhook)
-
-1. Criar segredos no Secret Manager:
 ```bash
-echo -n "TOKEN" | gcloud secrets create whatsapp-token --data-file=-
-echo -n "PHONE_ID" | gcloud secrets create whatsapp-phone-id --data-file=-
-echo -n "VERIFY" | gcloud secrets create whatsapp-verify-token --data-file=-
-echo -n "SECRET" | gcloud secrets create whatsapp-app-secret --data-file=-
-echo -n "TELEGRAM_TOKEN" | gcloud secrets create telegram-token --data-file=-
-```
-
-2. Deploy:
-```bash
+# Build & deploy webhook container
 gcloud builds submit --config cloudbuild.yaml
 ```
 
-3. Configurar webhooks:
-   - **WhatsApp** — URL: `https://gym-coach-XXXXX.run.app/webhook` na Meta Developer Console
-   - **Telegram** — Registar webhook:
-     ```
-     https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://gym-coach-XXXXX.run.app/telegram-webhook
-     ```
+### 3. Set Telegram Webhook
+
+```bash
+curl "https://api.telegram.org/bot<YOUR_TELEGRAM_TOKEN>/setWebhook?url=https://<YOUR_CLOUD_RUN_URL>/telegram-webhook"
+```
 
 ---
 
-## 🧠 Funcionalidades
-
-### 🏋️ Agente PT (Personal Trainer)
-- Sugere treinos com pesos baseados no histórico real
-- Regras de progressão linear com análise de RPE
-- Deload automático após falhas consecutivas
-- Nunca sobe carga se houver dor reportada
-- Planos de treino editáveis por dia da semana
-- Guarda e recupera planos estruturados
-
-### 🥗 Agente Nutrição
-- Analisa fotos de refeições via Gemini Vision
-- Estima calorias, macronutrientes e micronutrientes
-- Regista refeições com breakdown por alimento
-- Resumos diários e semanais com comparação a metas
-- Margem de erro declarada (±15-20%)
-
-### ⚙️ Gestão de Perfil
-- Onboarding automático na primeira mensagem
-- Atualização de peso, 1RMs, metas nutricionais
-- Suporte a campos nested (ex: `one_rm.agachamento`, `macros_alvo.proteina`)
-- Eliminação completa de dados — conformidade RGPD
-
-### 🔌 Integrações
-- **WhatsApp**: texto, imagens (com upload para Cloud Storage), validação de assinatura
-- **Telegram**: texto, fotos, comandos (`/start`), auto-split de mensagens longas
-- **Health check**: `GET /health`
-
----
-
-## 🗂️ Estrutura do Projeto
+## 📁 Repository Structure
 
 ```
 GymCoach/
-├── gym_coach/                  # Pacote ADK
+├── gym_coach/                  # ADK Package & Agent Definitions
 │   ├── __init__.py
-│   ├── agent.py                # Root agent — orquestrador (local + A2A remote)
-│   ├── agents/                 # Sub-agentes
-│   │   ├── pt_agent.py         #   Personal Trainer (powerlifting)
-│   │   └── nutrition_agent.py  #   Nutricionista (fotos + macros)
-│   ├── tools/                  # Function tools (auto-schema via ADK)
-│   │   ├── pt_tools.py         #   Histórico, registo, planos, progressão
-│   │   ├── nutrition_tools.py  #   Refeições, resumos diários/semanais
-│   │   └── common_tools.py     #   Perfil, onboarding, RGPD
-│   ├── prompts/                # System prompts (markdown)
+│   ├── agent.py                # Root Agent — Orchestrator (Local & Remote A2A)
+│   ├── agents/                 # Specialized Sub-Agents
+│   │   ├── pt_agent.py         #   Personal Trainer (Powerlifting & Load Progression)
+│   │   └── nutrition_agent.py  #   Sports Nutritionist (Photos & Macros)
+│   ├── tools/                  # Function Tools (Auto-Schema via ADK)
+│   │   ├── pt_tools.py         #   Workout logs, prescriptions, clinical notes, plans
+│   │   ├── nutrition_tools.py  #   Meal tracking, daily & weekly summaries
+│   │   └── common_tools.py     #   User profiles, onboarding, RGPD deletion
+│   ├── prompts/                # Modular System Prompts (Lookup-table style)
 │   │   ├── root_system.md
 │   │   ├── pt_system.md
 │   │   └── nutrition_system.md
-│   └── services/               # GCP clients
-│       ├── firestore_client.py #   Firestore CRUD (perfis, treinos, refeições)
-│       └── storage_client.py   #   Cloud Storage (fotos de refeições)
-├── webhook/                    # FastAPI — WhatsApp + Telegram
-│   ├── app.py                  #   Webhook principal (local/remote auto-detect)
-│   ├── whatsapp_client.py      #   WhatsApp Business API client
-│   ├── telegram_client.py      #   Telegram Bot API client
-│   └── signature.py            #   Validação de assinatura WhatsApp
+│   └── services/               # Google Cloud Client Wrappers
+│       ├── firestore_client.py #   Firestore CRUD (Users, Workouts, Prescriptions, Meals)
+│       └── storage_client.py   #   Cloud Storage (Meal Photo Uploads)
+├── webhook/                    # FastAPI Webhook Server
+│   ├── app.py                  #   Main Router & Telegram Webhook Processor
+│   └── telegram_client.py      #   Async Telegram Bot API Client
 ├── scripts/
-│   └── deploy_agent.py         # Deploy de agentes no Agent Engine
-├── tests/
-├── Dockerfile                  # Multi-stage build (Python 3.12-slim)
-├── cloudbuild.yaml             # CI/CD para Cloud Run
-├── requirements.txt
-├── .env.example
-└── .gitignore
+│   └── deploy_agent.py         # Automated Deployment Script for Agent Engine
+├── tests/                      # Unit & Integration Tests
+├── Dockerfile                  # Production Multi-Stage Build (Python 3.12-slim)
+├── cloudbuild.yaml             # GCP Cloud Build Configuration
+├── requirements.txt            # Python Dependencies
+└── README.md
 ```
-
----
-
-## 🔧 Variáveis de Ambiente
-
-| Variável | Descrição |
-|---|---|
-| `GOOGLE_GENAI_USE_VERTEXAI` | `TRUE` para usar Vertex AI |
-| `GOOGLE_CLOUD_PROJECT` | ID do projeto GCP |
-| `GOOGLE_CLOUD_LOCATION` | Região (ex: `us-central1`) |
-| `WHATSAPP_TOKEN` | Token de acesso da WhatsApp Business API |
-| `WHATSAPP_PHONE_NUMBER_ID` | ID do número de telefone WhatsApp |
-| `WHATSAPP_VERIFY_TOKEN` | Token de verificação do webhook |
-| `WHATSAPP_APP_SECRET` | App secret para validação de assinatura |
-| `TELEGRAM_TOKEN` | Token do bot Telegram |
-| `GCS_BUCKET_NAME` | Bucket para fotos de refeições |
-| `AGENT_ENGINE_RESOURCE_NAME` | Resource name do Agent Engine (ativa modo remote) |
-| `PT_AGENT_A2A_URL` | URL A2A do PT Agent (injetado pelo deploy script) |
-| `NUTRITION_AGENT_A2A_URL` | URL A2A do Nutrition Agent (injetado pelo deploy script) |
-| `LOG_LEVEL` | Nível de logging (default: `INFO`) |
 
 ---
 
 ## ⚠️ Disclaimer
 
-Este bot é uma ferramenta de apoio ao treino e nutrição. **Não substitui acompanhamento médico ou nutricional profissional.** As estimativas calóricas baseadas em fotos têm uma margem de erro de ±15-20%.
+GymCoach is an AI-powered fitness and nutrition assistant intended for informational and training guidance purposes only. **It is not a substitute for professional medical advice, diagnosis, or clinical nutrition counseling.** Visual meal calorie estimations carry an inherent margin of error of ±15-20%.
