@@ -103,24 +103,22 @@ def get_recent_workouts(
 ) -> list[dict[str, Any]]:
     """
     Get most recent workouts. Optionally filter by exercise.
+    Sorts in memory to avoid requiring Firestore composite indexes.
     """
-    query = (
-        _get_db()
-        .collection("users")
-        .document(phone)
-        .collection("treinos")
-        .order_by("data", direction=firestore.Query.DESCENDING)
-    )
+    col = _get_db().collection("users").document(phone).collection("treinos")
     if exercicio:
-        query = query.where(filter=firestore.FieldFilter("exercicio", "==", exercicio))
-    query = query.limit(limit)
+        query = col.where(filter=firestore.FieldFilter("exercicio", "==", exercicio))
+    else:
+        query = col.order_by("data", direction=firestore.Query.DESCENDING).limit(limit)
 
     results = []
     for doc in query.stream():
         d = doc.to_dict()
         d["id"] = doc.id
         results.append(d)
-    return results
+
+    results.sort(key=lambda x: str(x.get("data", "")), reverse=True)
+    return results[:limit]
 
 
 # =====================================================================
