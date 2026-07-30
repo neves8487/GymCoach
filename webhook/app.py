@@ -12,6 +12,7 @@ Both modes share the same WhatsApp/Telegram integration layer.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date
 import os
@@ -385,26 +386,48 @@ async def _process_message(message_data: dict[str, Any]) -> None:
         )
         return
 
-    # Run the agent and send response
-    try:
-        response = await _run_agent(
-            user_id=phone,
-            session_id=phone,
-            message=text,
-        )
-        if response:
-            await wa_client.send_text(phone, response)
-        else:
-            logger.warning("Agent returned empty response for %s", phone)
-            await wa_client.send_text(
-                phone,
-                "🤔 Não consegui gerar uma resposta. Tenta reformular a mensagem.",
+    # Run the agent and send response (with exponential backoff on 429 rate limits)
+    max_attempts = 3
+    backoff_delays = [3, 6, 12]
+    response = None
+
+    for attempt in range(max_attempts):
+        try:
+            response = await _run_agent(
+                user_id=phone,
+                session_id=phone,
+                message=text,
             )
-    except Exception:
-        logger.exception("Error running agent for %s", phone)
+            break
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                if attempt < max_attempts - 1:
+                    delay = backoff_delays[attempt]
+                    logger.warning("429 rate limit hit for %s (attempt %d/%d), retrying in %ds...", phone, attempt + 1, max_attempts, delay)
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    await wa_client.send_text(
+                        phone,
+                        "⏳ Muitas mensagens em simultâneo! Aguarda alguns segundos e tenta novamente.",
+                    )
+                    return
+            else:
+                logger.exception("Error running agent for %s", phone)
+                await wa_client.send_text(
+                    phone,
+                    "⚠️ Ocorreu um erro a processar a tua mensagem. Tenta novamente.",
+                )
+                return
+
+    if response:
+        await wa_client.send_text(phone, response)
+    else:
+        logger.warning("Agent returned empty response for %s", phone)
         await wa_client.send_text(
             phone,
-            "⚠️ Ocorreu um erro a processar a tua mensagem. Tenta novamente.",
+            "🤔 Não consegui gerar uma resposta. Tenta reformular a mensagem.",
         )
 
 
@@ -482,9 +505,12 @@ async def _process_telegram_message(message: dict[str, Any]) -> None:
         )
         return
 
-    # Run the agent and send response (with 1 retry on 429 rate limits)
+    # Run the agent and send response (with exponential backoff on 429 rate limits)
+    max_attempts = 3
+    backoff_delays = [3, 6, 12]
     response = None
-    for attempt in range(2):
+
+    for attempt in range(max_attempts):
         try:
             response = await _run_agent(
                 user_id=user_id,
@@ -495,9 +521,10 @@ async def _process_telegram_message(message: dict[str, Any]) -> None:
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                if attempt == 0:
-                    logger.warning("429 rate limit hit for %s, retrying in 3s...", user_id)
-                    await asyncio.sleep(3)
+                if attempt < max_attempts - 1:
+                    delay = backoff_delays[attempt]
+                    logger.warning("429 rate limit hit for %s (attempt %d/%d), retrying in %ds...", user_id, attempt + 1, max_attempts, delay)
+                    await asyncio.sleep(delay)
                     continue
                 else:
                     await tg_client.send_text(

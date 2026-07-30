@@ -12,6 +12,34 @@ from google.adk.tools import ToolContext
 from gym_coach.services import firestore_client as db
 
 
+def obter_contexto_completo_pt(
+    tool_context: ToolContext,
+    exercicio: str | None = None,
+) -> dict:
+    """
+    Obtém num ÚNICO passo todo o contexto do utilizador para prescrição de treino:
+    - Perfil e 1RMs (agachamento, supino, terra)
+    - Notas clínicas e lesões/dores ativas
+    - Histórico recente de treinos
+
+    Usa esta tool como PRIMEIRO PASSO para prescrever treino para máxima eficiência.
+    """
+    user_phone = tool_context.state.get("user_phone", "")
+    if not user_phone:
+        return {"error": "Número de telefone não disponível."}
+
+    profile = db.get_user(user_phone) or {}
+    notas = db.get_notas_clinicas(user_phone)
+    workouts = db.get_recent_workouts(phone=user_phone, exercicio=exercicio, limit=5)
+
+    return {
+        "perfil": profile,
+        "1rms": profile.get("one_rm", {}),
+        "notas_clinicas_lesoes": notas,
+        "historico_recente": workouts,
+    }
+
+
 def get_historico_exercicio(
     tool_context: ToolContext,
     exercicio: str | None = None,
@@ -144,8 +172,8 @@ def guardar_plano_treino(
     dia_semana: str,
     nome_treino: str,
     exercicios: list[dict],
-    tool_context: ToolContext,
     notas: str = "",
+    tool_context: ToolContext | None = None,
 ) -> dict:
     """
     Guarda ou atualiza o plano de treino estruturado para um dia da semana (ex: 'segunda', 'terca',
@@ -163,6 +191,9 @@ def guardar_plano_treino(
                     - notas (str, opcional): observações/equipamento (ex: 'Barra W')
         notas: Notas ou orientações gerais para o treino.
     """
+    if tool_context is None:
+        return {"error": "ToolContext não fornecido."}
+
     user_phone = tool_context.state.get("user_phone", "")
     if not user_phone:
         return {"error": "Número de telefone não disponível."}
@@ -211,8 +242,8 @@ def obter_plano_treino(
 def guardar_treino_prescrito(
     nome_treino: str,
     exercicios: list[dict],
-    tool_context: ToolContext,
     notas: str = "",
+    tool_context: ToolContext | None = None,
 ) -> dict:
     """
     Guarda o treino que o agente acabou de prescrever ao utilizador para o dia de hoje.
@@ -230,6 +261,9 @@ def guardar_treino_prescrito(
                     - notas (str, opcional): observações (ex: 'Barra W')
         notas: Notas ou orientações gerais para o treino.
     """
+    if tool_context is None:
+        return {"error": "ToolContext não fornecido."}
+
     user_phone = tool_context.state.get("user_phone", "")
     if not user_phone:
         return {"error": "Número de telefone não disponível."}

@@ -11,10 +11,12 @@ from pathlib import Path
 
 from google.adk.agents import Agent
 
+from gym_coach.tools.common_tools import atualizar_perfil, get_perfil
 from gym_coach.tools.pt_tools import (
     get_historico_exercicio,
     guardar_plano_treino,
     guardar_treino_prescrito,
+    obter_contexto_completo_pt,
     obter_notas_clinicas,
     obter_plano_treino,
     obter_treino_prescrito,
@@ -31,12 +33,15 @@ pt_agent = Agent(
     model="gemini-2.5-flash",
     description=(
         "Agente Personal Trainer especializado em powerlifting. "
-        "Gere treinos, sugere pesos com base no histórico, guarda e recupera "
-        "planos de treino editáveis, regista resultados, guarda treinos prescritos, "
-        "gere notas clínicas (lesões/dores) e aplica regras de progressão."
+        "Gere treinos, responde a dúvidas e dá conselhos sobre treino, estruturação de divisão semanal e força. "
+        "Sugere pesos com base no histórico, guarda e recupera planos de treino editáveis, regista resultados, "
+        "guarda treinos prescritos, gere notas clínicas (lesões/dores) e aplica regras de progressão."
     ),
     instruction=_SYSTEM_PROMPT,
     tools=[
+        obter_contexto_completo_pt,
+        get_perfil,
+        atualizar_perfil,
         get_historico_exercicio,
         registar_treino,
         guardar_plano_treino,

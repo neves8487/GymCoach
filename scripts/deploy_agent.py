@@ -49,8 +49,22 @@ REQUIREMENTS_FILE = str(PROJECT_ROOT / "requirements.txt")
 # Agent factory — imports and wraps each agent
 # ---------------------------------------------------------------
 
+def _clean_pycache():
+    """Remove stale compiled python bytecode and sys.modules cache before packaging."""
+    import shutil
+    for p in PROJECT_ROOT.rglob("__pycache__"):
+        try:
+            shutil.rmtree(p)
+        except Exception:
+            pass
+    for mod in list(sys.modules.keys()):
+        if mod.startswith("gym_coach"):
+            del sys.modules[mod]
+
+
 def _build_agent(name: str, env_vars: dict | None = None):
     """Import the agent object, wrap in App and AdkApp."""
+    _clean_pycache()
     from google.adk.apps import App
     from vertexai import agent_engines
 
@@ -161,15 +175,11 @@ def deploy_agent(
         resource_name = state[name]["resource_name"]
         logger.info("Updating %s …", resource_name)
 
-        update_kw: dict = {
-            "resource_name": resource_name,
-            "agent_engine": adk_app,
+        agent_engines.update(
+            resource_name=resource_name,
+            agent_engine=adk_app,
             **common_kw,
-        }
-        if env_vars:
-            update_kw["env_vars"] = env_vars
-
-        agent_engines.update(**update_kw)
+        )
         a2a_url = a2a_url_from_resource(resource_name, location)
         logger.info("✅ Updated: %s", resource_name)
     else:
