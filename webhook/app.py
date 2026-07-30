@@ -482,25 +482,43 @@ async def _process_telegram_message(message: dict[str, Any]) -> None:
         )
         return
 
-    # Run the agent and send response
-    try:
-        response = await _run_agent(
-            user_id=user_id,
-            session_id=user_id,
-            message=text,
-        )
-        if response:
-            await tg_client.send_text(chat_id, response)
-        else:
-            logger.warning("Agent returned empty response for %s", user_id)
-            await tg_client.send_text(
-                chat_id,
-                "🤔 Não consegui gerar uma resposta. Tenta reformular a mensagem.",
+    # Run the agent and send response (with 1 retry on 429 rate limits)
+    response = None
+    for attempt in range(2):
+        try:
+            response = await _run_agent(
+                user_id=user_id,
+                session_id=user_id,
+                message=text,
             )
-    except Exception:
-        logger.exception("Error running agent for %s", user_id)
+            break
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                if attempt == 0:
+                    logger.warning("429 rate limit hit for %s, retrying in 3s...", user_id)
+                    await asyncio.sleep(3)
+                    continue
+                else:
+                    await tg_client.send_text(
+                        chat_id,
+                        "⏳ Muitas mensagens em simultâneo! Aguarda alguns segundos e tenta novamente.",
+                    )
+                    return
+            else:
+                logger.exception("Error running agent for %s", user_id)
+                await tg_client.send_text(
+                    chat_id,
+                    "⚠️ Ocorreu um erro a processar a tua mensagem. Tenta novamente.",
+                )
+                return
+
+    if response:
+        await tg_client.send_text(chat_id, response)
+    else:
+        logger.warning("Agent returned empty response for %s", user_id)
         await tg_client.send_text(
             chat_id,
-            "⚠️ Ocorreu um erro a processar a tua mensagem. Tenta novamente.",
+            "🤔 Não consegui gerar uma resposta. Tenta reformular a mensagem.",
         )
 
