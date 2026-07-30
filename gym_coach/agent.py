@@ -59,12 +59,11 @@ if _PT_URL or _NUTRI_URL:
             )
         )
 else:
-    # Local Mode — delegate in-process
+    # Local Mode — delegate in-process via sub_agents
     from gym_coach.agents.pt_agent import pt_agent
     from gym_coach.agents.nutrition_agent import nutrition_agent
 
-    _tools.insert(0, AgentTool(agent=pt_agent))
-    _tools.insert(1, AgentTool(agent=nutrition_agent))
+    _sub_agents.extend([pt_agent, nutrition_agent])
 
 root_agent = Agent(
     name="gym_coach",

@@ -161,11 +161,15 @@ def deploy_agent(
         resource_name = state[name]["resource_name"]
         logger.info("Updating %s …", resource_name)
 
-        agent_engines.update(
-            resource_name=resource_name,
-            agent_engine=adk_app,
+        update_kw: dict = {
+            "resource_name": resource_name,
+            "agent_engine": adk_app,
             **common_kw,
-        )
+        }
+        if env_vars:
+            update_kw["env_vars"] = env_vars
+
+        agent_engines.update(**update_kw)
         a2a_url = a2a_url_from_resource(resource_name, location)
         logger.info("✅ Updated: %s", resource_name)
     else:
