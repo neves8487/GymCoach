@@ -13,19 +13,21 @@ from gym_coach.services import firestore_client as db
 
 
 def get_historico_exercicio(
-    exercicio: str,
-    ultimas_n: int,
     tool_context: ToolContext,
+    exercicio: str | None = None,
+    ultimas_n: int = 5,
 ) -> dict:
     """
-    Obtém as últimas N sessões de um exercício específico do histórico do utilizador.
-    Usa esta tool antes de sugerir pesos para garantir que as recomendações
-    são baseadas em dados reais.
+    Obtém as últimas N sessões de treino do histórico do utilizador.
+
+    Usa esta tool para consultar o histórico antes de sugerir pesos ou quando o
+    utilizador pergunta pelo seu último treino ou histórico recente.
 
     Args:
-        exercicio: Nome do exercício (ex: 'agachamento', 'banco', 'terra',
-                   'press_militar', 'remada', 'romeno').
-        ultimas_n: Número de sessões a retornar (recomendado: 3-5).
+        exercicio: Nome do exercício opcional (ex: 'agachamento', 'banco', 'terra', 'remada').
+                   Se omitido ou None, retorna as sessões de treino mais recentes de QUALQUER exercício
+                   (permitindo consultar o último treino completo ou sessões por grupo muscular).
+        ultimas_n: Número de sessões a retornar (padrão: 5, recomendado: 3-10).
     """
     user_phone = tool_context.state.get("user_phone", "")
     if not user_phone:
@@ -38,14 +40,15 @@ def get_historico_exercicio(
     )
 
     if not workouts:
+        nota = f"Sem histórico para '{exercicio}'." if exercicio else "Sem histórico de treinos registados."
         return {
             "exercicio": exercicio,
             "sessoes": [],
-            "nota": f"Sem histórico para '{exercicio}'. Pergunta ao utilizador por onde começar.",
+            "nota": nota,
         }
 
     return {
-        "exercicio": exercicio,
+        "exercicio": exercicio or "todos",
         "total_sessoes": len(workouts),
         "sessoes": workouts,
     }
@@ -202,4 +205,118 @@ def obter_plano_treino(
     return {
         "total_planos": len(planos),
         "planos": planos,
+    }
+
+
+def guardar_treino_prescrito(
+    nome_treino: str,
+    exercicios: list[dict],
+    tool_context: ToolContext,
+    notas: str = "",
+) -> dict:
+    """
+    Guarda o treino que o agente acabou de prescrever ao utilizador para o dia de hoje.
+    DEVE ser chamada SEMPRE que prescreves um treino ao utilizador, para que o sistema
+    saiba o que foi prescrito mesmo numa sessão nova.
+
+    Args:
+        nome_treino: Nome/foco do treino (ex: 'Costas e Bíceps', 'Push Day').
+        exercicios: Lista de exercícios prescritos. Cada exercício é um dicionário com:
+                    - nome (str): nome do exercício (ex: 'Remada Bent Over')
+                    - peso (float): peso recomendado em kg
+                    - sets (int): número de séries alvo
+                    - reps (int): número de repetições alvo
+                    - rpe_alvo (float, opcional): RPE alvo (ex: 8.0)
+                    - notas (str, opcional): observações (ex: 'Barra W')
+        notas: Notas ou orientações gerais para o treino.
+    """
+    user_phone = tool_context.state.get("user_phone", "")
+    if not user_phone:
+        return {"error": "Número de telefone não disponível."}
+
+    workout_data = {
+        "nome_treino": nome_treino,
+        "exercicios": exercicios,
+        "notas": notas,
+    }
+
+    data_id = db.save_prescribed_workout(user_phone, workout_data)
+    return {
+        "status": "prescrito_guardado",
+        "data": data_id,
+        "nome_treino": nome_treino,
+        "total_exercicios": len(exercicios),
+    }
+
+
+def obter_treino_prescrito(
+    tool_context: ToolContext,
+    data: str | None = None,
+) -> dict:
+    """
+    Obtém o treino prescrito pelo agente para uma data específica ou para hoje.
+    Usa esta tool quando o utilizador diz 'Fiz tudo o pedido' ou 'Cumpri o treino'
+    para saber exactamente o que foi prescrito e registar o treino executado.
+
+    Args:
+        data: Data no formato 'YYYY-MM-DD'. Se omitido, retorna o treino prescrito de hoje.
+    """
+    user_phone = tool_context.state.get("user_phone", "")
+    if not user_phone:
+        return {"error": "Número de telefone não disponível."}
+
+    prescrito = db.get_prescribed_workout(user_phone, data)
+    if not prescrito:
+        msg = f"Sem treino prescrito para '{data}'." if data else "Sem treino prescrito para hoje."
+        return {"prescrito": None, "nota": msg}
+
+    return {
+        "data": prescrito.get("data"),
+        "nome_treino": prescrito.get("nome_treino"),
+        "exercicios": prescrito.get("exercicios", []),
+        "notas": prescrito.get("notas", ""),
+    }
+
+
+def registar_nota_clinica(
+    descricao: str,
+    tool_context: ToolContext,
+) -> dict:
+    """
+    Regista uma nota clínica no perfil do utilizador: dor, lesão, restrição médica
+    ou qualquer condição que afete o treino.
+    Usa esta tool sempre que o utilizador reportar dor, lesão ou limitação física.
+
+    Args:
+        descricao: Descrição da condição (ex: 'Dor no ombro direito durante press militar',
+                   'Lesão antiga no joelho esquerdo', 'Hérnia discal L4-L5').
+    """
+    user_phone = tool_context.state.get("user_phone", "")
+    if not user_phone:
+        return {"error": "Número de telefone não disponível."}
+
+    nota = db.add_nota_clinica(user_phone, descricao)
+    return {
+        "status": "nota_registada",
+        "nota": nota,
+    }
+
+
+def obter_notas_clinicas(tool_context: ToolContext) -> dict:
+    """
+    Obtém as notas clínicas ativas do utilizador (dores, lesões, restrições médicas).
+    Usa esta tool SEMPRE antes de prescrever treinos para evitar exercícios que agravem
+    condições existentes.
+    """
+    user_phone = tool_context.state.get("user_phone", "")
+    if not user_phone:
+        return {"error": "Número de telefone não disponível."}
+
+    notas = db.get_notas_clinicas(user_phone)
+    if not notas:
+        return {"notas": [], "nota": "Sem notas clínicas registadas."}
+
+    return {
+        "total_notas": len(notas),
+        "notas": notas,
     }

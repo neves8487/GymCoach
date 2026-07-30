@@ -14,7 +14,11 @@ from google.adk.agents import Agent
 from gym_coach.tools.pt_tools import (
     get_historico_exercicio,
     guardar_plano_treino,
+    guardar_treino_prescrito,
+    obter_notas_clinicas,
     obter_plano_treino,
+    obter_treino_prescrito,
+    registar_nota_clinica,
     registar_treino,
 )
 
@@ -28,7 +32,8 @@ pt_agent = Agent(
     description=(
         "Agente Personal Trainer especializado em powerlifting. "
         "Gere treinos, sugere pesos com base no histórico, guarda e recupera "
-        "planos de treino editáveis, regista resultados e aplica regras de progressão."
+        "planos de treino editáveis, regista resultados, guarda treinos prescritos, "
+        "gere notas clínicas (lesões/dores) e aplica regras de progressão."
     ),
     instruction=_SYSTEM_PROMPT,
     tools=[
@@ -36,5 +41,9 @@ pt_agent = Agent(
         registar_treino,
         guardar_plano_treino,
         obter_plano_treino,
+        guardar_treino_prescrito,
+        obter_treino_prescrito,
+        registar_nota_clinica,
+        obter_notas_clinicas,
     ],
 )

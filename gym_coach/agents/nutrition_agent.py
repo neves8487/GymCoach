@@ -11,6 +11,7 @@ from pathlib import Path
 
 from google.adk.agents import Agent
 
+from gym_coach.tools.common_tools import atualizar_perfil
 from gym_coach.tools.nutrition_tools import (
     registar_refeicao,
     get_resumo_diario,
@@ -28,9 +29,8 @@ nutrition_agent = Agent(
     description=(
         "Agente Nutricionista especializado em nutrição desportiva. "
         "Analisa fotos de refeições para estimar calorias e macronutrientes, "
-        "regista refeições, e dá resumos diários e semanais. "
-        "Usa quando o utilizador envia uma foto de comida, fala sobre "
-        "calorias, macros, dieta, ou pede resumos nutricionais."
+        "regista refeições, atualiza perfil com metas de calorias e proteína no Firestore, "
+        "e dá resumos diários e semanais."
     ),
     instruction=_SYSTEM_PROMPT,
     tools=[
@@ -38,5 +38,6 @@ nutrition_agent = Agent(
         get_resumo_diario,
         get_resumo_semanal,
         get_metas_nutricionais,
+        atualizar_perfil,
     ],
 )

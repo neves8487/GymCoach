@@ -13,6 +13,7 @@ Both modes share the same WhatsApp/Telegram integration layer.
 from __future__ import annotations
 
 import logging
+from datetime import date
 import os
 from contextlib import asynccontextmanager
 from typing import Any
@@ -251,7 +252,7 @@ async def _run_agent(user_id: str, session_id: str, message: str) -> str:
       REMOTE — agent_engine.async_stream_query() via Agent Engine SDK
     """
     clean_user = _clean_session_id(user_id)
-    clean_session = f"session-{clean_user}"
+    clean_session = f"session-{clean_user}-{date.today().isoformat()}"
 
     if _USE_REMOTE:
         # --- Agent Engine SDK ---

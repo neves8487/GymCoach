@@ -5,6 +5,8 @@ Collections:
   users/{phone}
   users/{phone}/treinos/{treino_id}
   users/{phone}/refeicoes/{refeicao_id}
+  users/{phone}/planos_treino/{dia_semana}
+  users/{phone}/treinos_prescritos/{data_YYYY-MM-DD}
 """
 
 from __future__ import annotations
@@ -61,9 +63,9 @@ def delete_all_user_data(phone: str) -> dict[str, int]:
     """
     db = _get_db()
     user_ref = db.collection("users").document(phone)
-    deleted = {"treinos": 0, "refeicoes": 0, "planos_treino": 0}
+    deleted = {"treinos": 0, "refeicoes": 0, "planos_treino": 0, "treinos_prescritos": 0}
 
-    for sub in ("treinos", "refeicoes", "planos_treino"):
+    for sub in ("treinos", "refeicoes", "planos_treino", "treinos_prescritos"):
         docs = list(user_ref.collection(sub).stream())
         for doc in docs:
             doc.reference.delete()
@@ -260,3 +262,92 @@ def delete_workout_plan(phone: str, dia_semana: str) -> None:
     dia_clean = str(dia_semana).lower().strip()
     _get_db().collection("users").document(phone).collection("planos_treino").document(dia_clean).delete()
     logger.info("Workout plan %s deleted for %s", dia_clean, phone)
+
+
+# =====================================================================
+# Prescribed Workouts (treinos_prescritos)
+# =====================================================================
+
+def save_prescribed_workout(phone: str, workout_data: dict[str, Any]) -> str:
+    """
+    Save the workout prescribed by the agent for a specific date.
+    Collection: users/{phone}/treinos_prescritos/{YYYY-MM-DD}
+    Overwrites any previous prescription for the same date.
+    """
+    data_str = workout_data.get("data") or datetime.utcnow().strftime("%Y-%m-%d")
+    workout_data["data"] = data_str
+    workout_data["created_at"] = datetime.utcnow().isoformat()
+
+    ref = (
+        _get_db()
+        .collection("users")
+        .document(phone)
+        .collection("treinos_prescritos")
+        .document(data_str)
+    )
+    ref.set(workout_data)
+    logger.info("Prescribed workout saved for %s on %s", phone, data_str)
+    return data_str
+
+
+def get_prescribed_workout(
+    phone: str, data: str | None = None
+) -> dict[str, Any] | None:
+    """
+    Fetch the prescribed workout for a specific date.
+    Defaults to today if no date is provided.
+    """
+    if data is None:
+        data = datetime.utcnow().strftime("%Y-%m-%d")
+
+    doc = (
+        _get_db()
+        .collection("users")
+        .document(phone)
+        .collection("treinos_prescritos")
+        .document(data)
+        .get()
+    )
+    if doc.exists:
+        d = doc.to_dict()
+        d["id"] = doc.id
+        return d
+    return None
+
+
+# =====================================================================
+# Clinical Notes (notas_clinicas — stored in user profile)
+# =====================================================================
+
+def add_nota_clinica(phone: str, descricao: str) -> dict[str, Any]:
+    """
+    Add a clinical note (injury, pain, medical restriction) to the user profile.
+    Stored as a list of dicts in the 'notas_clinicas' field.
+    """
+    profile = get_user(phone) or {}
+    notas = profile.get("notas_clinicas", [])
+    if not isinstance(notas, list):
+        notas = []
+
+    nova_nota = {
+        "descricao": descricao,
+        "data": datetime.utcnow().strftime("%Y-%m-%d"),
+        "ativo": True,
+    }
+    notas.append(nova_nota)
+    upsert_user(phone, {"notas_clinicas": notas})
+    logger.info("Clinical note added for %s: %s", phone, descricao)
+    return nova_nota
+
+
+def get_notas_clinicas(phone: str, apenas_ativas: bool = True) -> list[dict[str, Any]]:
+    """
+    Get clinical notes for a user. By default returns only active notes.
+    """
+    profile = get_user(phone) or {}
+    notas = profile.get("notas_clinicas", [])
+    if not isinstance(notas, list):
+        return []
+    if apenas_ativas:
+        return [n for n in notas if n.get("ativo", True)]
+    return notas

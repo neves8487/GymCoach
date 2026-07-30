@@ -42,10 +42,13 @@ def atualizar_perfil(
 
     Args:
         campo: Nome do campo a atualizar. Valores possíveis:
-               'nome', 'peso_corporal', 'altura', 'objetivo',
+               'nome', 'peso_corporal', 'altura', 'objetivo', 'frequencia_treino_semanal',
                'calorias_alvo', 'preferencias_alimentares', 'alergias'.
                Para 1RMs usar formato 'one_rm.agachamento', 'one_rm.banco', 'one_rm.terra'.
                Para macros usar formato 'macros_alvo.proteina', 'macros_alvo.hidratos', 'macros_alvo.gordura'.
+               Para preferências de exercícios usar:
+                 'preferencias_exercicios.excluidos' (exercícios a evitar, ex: 'leg press, smith machine')
+                 'preferencias_exercicios.favoritos' (exercícios preferidos, ex: 'remada bent over, pull-ups')
         valor: O novo valor para o campo (será convertido para o tipo adequado).
     """
     user_phone = tool_context.state.get("user_phone", "")
