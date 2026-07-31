@@ -410,15 +410,20 @@ async def _run_agent_remote(user_id: str, message: str) -> str:
         except Exception:
             logger.warning("Could not auto-create session %s (may already exist)", session_id)
 
-    final = ""
-    async for event in agent_engine.async_stream_query(
-        user_id=clean_user,
-        session_id=session_id,
-        message=message,
-    ):
-        text = _extract_text_from_event(event)
-        if text:
-            final = text  # keep the last meaningful chunk
+    async def _do_query():
+        final = ""
+        async for event in agent_engine.async_stream_query(
+            user_id=clean_user,
+            session_id=session_id,
+            message=message,
+        ):
+            text = _extract_text_from_event(event)
+            if text:
+                final = text  # keep the last meaningful chunk
+        return final
+
+    from webhook.retry_helper import retry_async_with_backoff
+    final = await retry_async_with_backoff(_do_query)
 
     logger.info("REMOTE — done for %s (session=%s)", clean_user, session_id)
     return final
@@ -551,7 +556,7 @@ async def _build_whatsapp_text(
             image_bytes = await wa_client.download_media(image_id)
             from gym_coach.services import storage_client
             gs_uri = storage_client.upload_photo(phone, image_bytes)
-            return f"{caption}\n\n[Foto guardada em: {gs_uri}]"
+            return f"📸 FOTO DE REFEIÇÃO ENVIADA PELO UTILIZADOR\nLegenda: {caption}\nFicheiro de Imagem: {gs_uri}\n\nAnalisa os alimentos na foto, estima calorias/macros e regista a refeição."
         except Exception:
             logger.exception("Failed to process image %s", image_id)
             await wa_client.send_text(
@@ -618,7 +623,7 @@ async def _build_telegram_text(
             image_bytes = await tg_client.download_file(file_id)
             from gym_coach.services import storage_client
             gs_uri = storage_client.upload_photo(user_id, image_bytes)
-            return f"{caption}\n\n[Foto guardada em: {gs_uri}]"
+            return f"📸 FOTO DE REFEIÇÃO ENVIADA PELO UTILIZADOR\nLegenda: {caption}\nFicheiro de Imagem: {gs_uri}\n\nAnalisa os alimentos na foto, estima calorias/macros e regista a refeição."
         except Exception:
             logger.exception("Failed to process Telegram photo %s", file_id)
             await tg_client.send_text(

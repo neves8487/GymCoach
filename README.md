@@ -156,25 +156,12 @@ python scripts/deploy_agent.py --agent all --update --project YOUR_PROJECT_ID --
 
 ### 2. Deploy Webhook Service to Cloud Run
 
-Via GCP Cloud Build:
 ```bash
 # Build & deploy webhook container
 gcloud builds submit --config cloudbuild.yaml
 ```
 
-Or via PowerShell deployment script (Windows):
-```powershell
-.\scripts\deploy_cloudrun.ps1
-```
-
-### 3. Test Agent Locally
-
-```bash
-# Interactively test agent responses from CLI
-python scripts/test_agent.py
-```
-
-### 4. Set Telegram Webhook
+### 3. Set Telegram Webhook
 
 ```bash
 curl "https://api.telegram.org/bot<YOUR_TELEGRAM_TOKEN>/setWebhook?url=https://<YOUR_CLOUD_RUN_URL>/telegram-webhook"
@@ -207,9 +194,7 @@ GymCoach/
 │   ├── app.py                  #   Main Router & Telegram Webhook Processor
 │   └── telegram_client.py      #   Async Telegram Bot API Client
 ├── scripts/
-│   ├── deploy_agent.py         # Automated Deployment Script for Agent Engine
-│   ├── deploy_cloudrun.ps1     # Cloud Run Build & Deploy PowerShell Script
-│   └── test_agent.py           # CLI Local Testing Script
+│   └── deploy_agent.py         # Automated Deployment Script for Agent Engine
 ├── tests/                      # Unit & Integration Tests
 ├── Dockerfile                  # Production Multi-Stage Build (Python 3.12-slim)
 ├── cloudbuild.yaml             # GCP Cloud Build Configuration
