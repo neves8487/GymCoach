@@ -10,13 +10,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
-# Copy minimal application code required for webhook + GCS photo service
+# Webhook + todo o pacote gym_coach (agentes, tools, prompts, services)
 COPY webhook/ ./webhook/
-COPY gym_coach/services/ ./gym_coach/services/
-COPY gym_coach/__init__.py ./gym_coach/
+COPY gym_coach/ ./gym_coach/
 
 EXPOSE 8080
 

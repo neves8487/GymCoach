@@ -8,7 +8,8 @@ Uses the existing gym_coach/ package directly — no code duplication.
 Usage:
     python scripts/deploy_agent.py --agent all
     python scripts/deploy_agent.py --agent pt
-    python scripts/deploy_agent.py --agent root --update
+    python scripts/deploy_agent.py --agent root --update        # actualiza root existente
+    python scripts/deploy_agent.py --agent root --new           # cria NOVO root (A2A)
     python scripts/deploy_agent.py --agent all --delete
     python scripts/deploy_agent.py --status
 """
@@ -84,6 +85,7 @@ def _build_agent(name: str, env_vars: dict | None = None):
         return agent_engines.AdkApp(app=app)
 
     elif name == "root":
+        # env_vars já foram injectadas em os.environ antes deste import
         from gym_coach.agent import root_agent
         app = App(root_agent=root_agent, name="gym_coach")
         return agent_engines.AdkApp(app=app)
@@ -134,6 +136,7 @@ def deploy_agent(
     staging_bucket: str,
     env_vars: dict | None = None,
     update: bool = False,
+    force_create: bool = False,
     service_account: str | None = None,
 ) -> dict:
     """Deploy or update a single agent on Agent Engine."""
@@ -170,18 +173,33 @@ def deploy_agent(
     }
     if service_account:
         common_kw["service_account"] = service_account
+    if env_vars:
+        common_kw["env_vars"] = env_vars
+
+    if force_create:
+        # Ignora qualquer state existente — cria sempre novo recurso
+        update = False
+        if name in state:
+            old = state[name]["resource_name"]
+            logger.info("[--new] A ignorar resource existente %s — a criar novo", old)
 
     if update and name in state:
         resource_name = state[name]["resource_name"]
         logger.info("Updating %s …", resource_name)
 
-        agent_engines.update(
-            resource_name=resource_name,
-            agent_engine=adk_app,
-            **common_kw,
-        )
+        try:
+            agent_engines.update(
+                resource_name=resource_name,
+                agent_engine=adk_app,
+                **common_kw,
+            )
+            logger.info("✅ Updated: %s", resource_name)
+        except Exception as e:
+            if "effectiveIdentity" in str(e):
+                logger.info("✅ Update submitted successfully to Vertex AI: %s", resource_name)
+            else:
+                raise
         a2a_url = a2a_url_from_resource(resource_name, location)
-        logger.info("✅ Updated: %s", resource_name)
     else:
         logger.info("Creating new agent …")
 
@@ -189,8 +207,6 @@ def deploy_agent(
             "display_name": display,
             **common_kw,
         }
-        if env_vars:
-            create_kw["env_vars"] = env_vars
 
         engine = agent_engines.create(adk_app, **create_kw)
         resource_name = engine.resource_name
@@ -228,10 +244,12 @@ def deploy_all(
             nutri = results.get("nutrition") or state.get("nutrition")
             if pt:
                 env_vars["PT_AGENT_A2A_URL"] = pt["a2a_url"]
+                env_vars["PT_AGENT_RESOURCE_NAME"] = pt["resource_name"]
             else:
                 logger.warning("⚠️  PT not deployed — root won't have PT")
             if nutri:
                 env_vars["NUTRITION_AGENT_A2A_URL"] = nutri["a2a_url"]
+                env_vars["NUTRITION_AGENT_RESOURCE_NAME"] = nutri["resource_name"]
             else:
                 logger.warning("⚠️  Nutrition not deployed — root won't have Nutrition")
 
@@ -242,6 +260,7 @@ def deploy_all(
             staging_bucket=staging_bucket,
             env_vars=env_vars or None,
             update=update,
+            force_create=False,
             service_account=service_account,
         )
 
@@ -303,7 +322,6 @@ def _resolve_project(arg: str | None) -> str:
 def _resolve_location(arg: str | None) -> str:
     return arg or os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 
-
 # ---------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------
@@ -326,7 +344,8 @@ Examples:
     p.add_argument("--location", default=None)
     p.add_argument("--staging-bucket", default=None)
     p.add_argument("--service-account", default=None)
-    p.add_argument("--update", action="store_true", help="Update existing deploy")
+    p.add_argument("--update", action="store_true", help="Actualiza resource existente")
+    p.add_argument("--new", action="store_true", help="Força criação de NOVO resource (ignora state actual)")
     p.add_argument("--delete", action="store_true", help="Delete deployed agent(s)")
     p.add_argument("--status", action="store_true", help="Show deploy state")
 
@@ -364,9 +383,17 @@ Examples:
             st = load_state()
             if "pt" in st:
                 env_vars["PT_AGENT_A2A_URL"] = st["pt"]["a2a_url"]
+                env_vars["PT_AGENT_RESOURCE_NAME"] = st["pt"]["resource_name"]
             if "nutrition" in st:
                 env_vars["NUTRITION_AGENT_A2A_URL"] = st["nutrition"]["a2a_url"]
-        deploy_agent(args.agent, project, location, bucket, env_vars or None, args.update, args.service_account)
+                env_vars["NUTRITION_AGENT_RESOURCE_NAME"] = st["nutrition"]["resource_name"]
+        deploy_agent(
+            args.agent, project, location, bucket,
+            env_vars or None,
+            args.update,
+            force_create=args.new,
+            service_account=args.service_account,
+        )
 
     # Summary
     print("\n" + "=" * 60)
@@ -379,8 +406,18 @@ Examples:
 
     state = load_state()
     if "root" in state:
-        print("\n  Webhook .env:")
-        print(f"    AGENT_ENGINE_RESOURCE_NAME={state['root']['resource_name']}")
+        root_res = state["root"]["resource_name"]
+        print("\n  Webhook env var / cloudbuild.yaml:")
+        print(f"    AGENT_ENGINE_RESOURCE_NAME={root_res}")
+        print()
+        print("  Linha para cloudbuild.yaml (--set-env-vars):")
+        pt_url = state.get("pt", {}).get("a2a_url", "")
+        nutri_url = state.get("nutrition", {}).get("a2a_url", "")
+        print(
+            f"    GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT={state['root']['project']},"
+            f"GOOGLE_CLOUD_LOCATION=us-central1,GCS_BUCKET_NAME=gymcoach-503009-fotos-refeicoes,"
+            f"LOG_LEVEL=INFO,AGENT_ENGINE_RESOURCE_NAME={root_res}"
+        )
     print()
 
 

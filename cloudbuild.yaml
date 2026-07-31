@@ -8,6 +8,9 @@ steps:
     args: ['push', 'gcr.io/$PROJECT_ID/gym-coach']
 
   # Deploy to Cloud Run
+  # PT_AGENT_A2A_URL e NUTRITION_AGENT_A2A_URL são as URLs A2A dos Agent Engine deployados.
+  # Geradas por: python scripts/deploy_agent.py --agent all
+  # Formato: https://us-central1-aiplatform.googleapis.com/v1/projects/.../reasoningEngines/.../.well-known/agent.json
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
@@ -24,7 +27,7 @@ steps:
       - '--max-instances=3'
       - '--service-account=agente-pt-nutricao@$PROJECT_ID.iam.gserviceaccount.com'
       - '--set-secrets=WHATSAPP_TOKEN=whatsapp-token:latest,WHATSAPP_PHONE_NUMBER_ID=whatsapp-phone-id:latest,WHATSAPP_VERIFY_TOKEN=whatsapp-verify-token:latest,WHATSAPP_APP_SECRET=whatsapp-app-secret:latest,TELEGRAM_TOKEN=telegram-token:latest'
-      - '--set-env-vars=GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=us-central1,AGENT_ENGINE_RESOURCE_NAME=projects/582508796330/locations/us-central1/reasoningEngines/7208452657525030912,GCS_BUCKET_NAME=gymcoach-503009-fotos-refeicoes,LOG_LEVEL=INFO'
+      - '--set-env-vars=GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=us-central1,GCS_BUCKET_NAME=gymcoach-503009-fotos-refeicoes,LOG_LEVEL=INFO,AGENT_ENGINE_RESOURCE_NAME=projects/582508796330/locations/us-central1/reasoningEngines/7208452657525030912'
 
 images:
   - 'gcr.io/$PROJECT_ID/gym-coach'

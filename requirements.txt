@@ -10,3 +10,4 @@ google-cloud-secret-manager
 google-cloud-firestore
 google-adk
 a2a-sdk
+sse-starlette
