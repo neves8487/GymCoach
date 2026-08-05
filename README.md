@@ -44,7 +44,7 @@
 | **Foundation Model** | Gemini 2.5 Flash (Google Cloud Vertex AI) |
 | **Multi-Agent Protocol** | AgentTool (Local) / A2A RemoteAgent (Remote) |
 | **Persistence Store** | Google Cloud Firestore (Document Database) |
-| **Media Storage** | Google Cloud Storage (Bucket `gymcoach-503009-fotos-refeicoes`) |
+| **Media Storage** | Google Cloud Storage (Bucket) |
 | **Webhook Service** | FastAPI + Uvicorn (Python 3.12, Dockerized) |
 | **Messaging Channel** | Telegram Bot API |
 | **Cloud Hosting** | GCP Cloud Run (Serverless Webhook) |
